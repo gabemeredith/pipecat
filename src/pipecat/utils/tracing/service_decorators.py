@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 
 from pipecat.frames.frames import (
     MetricsFrame,
+    TranscriptionFinalizedFrame,
     TranscriptionFrame,
     TTSStoppedFrame,
     UserStoppedSpeakingFrame,
@@ -698,6 +699,10 @@ def traced_stt(func: Callable | None = None, *, name: str | None = None) -> Call
                 and closes on ``finalized=True``. Multiple finalized
                 transcripts in a single turn produce multiple spans.
 
+                A finalization confirmed after its text arrives as a
+                ``TranscriptionFinalizedFrame`` and closes the span the
+                same way.
+
                 For services that never set ``frame.finalized=True``
                 (e.g. Deepgram, which only marks it via
                 ``confirm_finalize()``), the span closes on
@@ -758,6 +763,18 @@ def traced_stt(func: Callable | None = None, *, name: str | None = None) -> Call
                         state["span"] = None
                         state["segment_start_time"] = None
                         state["segments"] = []
+                elif isinstance(frame, TranscriptionFinalizedFrame):
+                    # The finalization arrived after its text, so the span
+                    # holding that text closes here rather than on a transcript.
+                    span = state["span"]
+                    if span is None:
+                        return
+                    span.set_attribute("is_final", True)
+                    attach_pending_usage(state)
+                    span.end()
+                    state["span"] = None
+                    state["segment_start_time"] = None
+                    state["segments"] = []
 
             @functools.wraps(original_push_frame)
             async def patched_push_frame(self, frame, direction=FrameDirection.DOWNSTREAM):
